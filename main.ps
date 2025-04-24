@@ -1,0 +1,142 @@
+//@version=6
+indicator('Demand and Supply Zones V3', overlay = true, max_bars_back = 5000)
+
+//Input parameters for customization
+var float rallyThreshold = input.float(1.2, 'Rally Candle Threshold (%)', minval = 1, maxval = 5, step = 0.1)
+var float baseThreshold = input.float(0.5, 'Base Candle Threshold (%)', minval = 0.1, maxval = 2, step = 0.1)
+var color demandZoneColor = input.color(color.green, 'Demand Zone Color')
+var color supplyZoneColor = input.color(color.red, 'Supply Zone Color')
+var int zoneExtension = input.int(6, 'Zone Extension Bars', minval = 1, maxval = 50)
+var int maxSupplyZones = input.int(2, 'Max Supply Zones', minval = 1, maxval = 6)
+var int maxDemandZones = input.int(2, 'Max Demand Zones', minval = 1, maxval = 6)
+bool testedZone = input.bool(false, 'Tested Zone')
+var int maxScannedCandles = input.int(5000, 'Max Scan Candles', minval = 100, maxval = 5000)
+bool showCandleNumbers = input.bool(false, 'Show Candle Numbers') // Option to show/hide candle numbers
+
+
+// Function to check if a candle is a Rally candle
+isRallyCandle(currOpen, currClose, currHigh, currLow, prevOpen, prevClose, prevHigh, prevLow) =>
+    //log.info(" isRallyCandle currOpen :" + str.tostring(currOpen) + " currClose :" + str.tostring(currClose) + " prevHigh :" + str.tostring(prevHigh) + " prevLow :" + str.tostring(prevLow))
+    bodySize = math.abs(currClose - currOpen)
+    prevBodySize = math.abs(prevHigh - prevLow)
+    // log.info("Checking isRallyCandle Candle bodySize:" + str.tostring(bodySize) + " prevBodySize:" + str.tostring(prevBodySize))
+    bodySize >= prevBodySize * rallyThreshold and currClose > currOpen
+
+// Function to check if a candle is a Rally candle
+isDropCandle(currOpen, currClose, currHigh, currLow, prevOpen, prevClose, prevHigh, prevLow) =>
+    //log.info(" isDropCandle currOpen :" + str.tostring(currOpen) + " currClose :" + str.tostring(currClose) + " prevHigh :" + str.tostring(prevHigh) + " prevLow :" + str.tostring(prevLow))
+    bodySize = math.abs(currClose - currOpen)
+    prevBodySize = math.abs(prevHigh - prevLow)
+    // log.info("Checking isDropCandle Candle bodySize:" + str.tostring(bodySize) + " prevBodySize:" + str.tostring(prevBodySize))
+    bodySize >= prevBodySize * rallyThreshold and currClose < currOpen
+
+// Function to check if a candle is a Base candle
+isBaseCandle(prevOpen, prevClose, prevHigh, prevLow, currentOpen, currentClose, currenHigh, currenLow) =>
+    bodySize = math.abs(prevHigh - prevLow)
+    currBodySize = math.abs(currenHigh - currenLow)
+    bodySize <= currBodySize * baseThreshold
+
+// Function to check if a candle is a Base candle
+isSupplyTestedZone(index, lowest) =>
+    bool tested = false
+    for i = 0 to index - 2 by 1
+        if high[i] > lowest
+            tested := true
+            break
+    tested
+
+// Function to check if a candle is a Base candle
+isDemandTestedZone(index, highest) =>
+    bool tested = false
+    for i = 0 to index - 2 by 1
+        if low[i] < highest
+            tested := true
+            break
+    tested
+    // Function to detect Demand and Supply Zones
+detectZones() =>
+    // log.info("Current index :" + str.tostring(bar_index))
+    // Iterate through historical data
+    if barstate.islastconfirmedhistory
+        var demandZones = array.new_box()
+        var supplyZones = array.new_box()
+        for i = 1 to math.min(bar_index, maxScannedCandles) by 1
+            // log.info("I index :" + str.tostring(i))
+            currOpen = open[i - 1]
+            currClose = close[i - 1]
+            currHigh = high[i - 1]
+            currLow = low[i - 1]
+            prevOpen = open[i]
+            prevClose = close[i]
+            prevHigh = high[i]
+            prevLow = low[i]
+            // Rally Base Rally Zone
+            if isRallyCandle(currOpen, currClose, currHigh, currLow, prevOpen, prevClose, prevHigh, prevLow) and demandZones.size() < maxDemandZones and close > high[i - 1]
+                var InitiallowestBase = low[i]
+                var InitialhighestBase = high[i]
+                var lowestBase = InitiallowestBase
+                var highestBase = InitialhighestBase
+                for j = i to i + zoneExtension - 1 by 1
+                    isZoneFound = false
+                    baseOpen = open[j]
+                    baseClose = close[j]
+                    baseHigh = high[j]
+                    baseLow = low[j]
+                    prevBaseOpen = open[j + 1]
+                    prevBaseCLose = close[j + 1]
+                    prevBaseHigh = high[j + 1]
+                    prevBaseLow = low[j + 1]
+                    lowestBase := math.min(lowestBase, baseLow, prevBaseLow, InitiallowestBase)
+                    highestBase := math.max(highestBase, baseHigh, prevBaseHigh, InitialhighestBase)
+                    if isRallyCandle(baseOpen, baseClose, baseHigh, baseLow, prevOpen, prevClose, prevHigh, prevLow) or isDropCandle(baseOpen, baseClose, baseHigh, baseLow, prevOpen, prevClose, prevHigh, prevLow)
+                        lowestBase := low[j - 1]
+                        highestBase := high[j - 1]
+                        bottomRight = chart.point.from_index(bar_index - j + 1, lowestBase)
+                        topLeft = chart.point.from_index(bar_index - j + 1, highestBase)
+                        if testedZone == true or isDemandTestedZone(i, highestBase) == false
+                            array.push(demandZones, box.new(topLeft, bottomRight, color.green, 2, bgcolor = color.new(color.green, 70), extend = extend.right))
+                            isZoneFound := true
+                            isZoneFound
+                    else
+                        lowestBase := math.min(lowestBase, baseLow, prevBaseLow)
+                        highestBase := math.max(highestBase, baseHigh, prevBaseHigh)
+                        highestBase
+                    if isZoneFound
+                        break
+            else if isDropCandle(currOpen, currClose, currHigh, currLow, prevOpen, prevClose, prevHigh, prevLow) and supplyZones.size() < maxSupplyZones and close < high[i - 1]
+                var lowestBase = low[i]
+                var highestBase = high[i]
+                for j = i to i + zoneExtension - 1 by 1
+                    isZoneFound = false
+                    baseOpen = open[j]
+                    baseClose = close[j]
+                    baseHigh = high[j]
+                    baseLow = low[j]
+                    prevBaseOpen = open[j + 1]
+                    prevBaseCLose = close[j + 1]
+                    prevBaseHigh = high[j + 1]
+                    prevBaseLow = low[j + 1]
+                    lowestBase := math.min(lowestBase, baseLow, prevBaseLow)
+                    highestBase := math.max(highestBase, baseHigh, prevBaseHigh)
+                    if isRallyCandle(baseOpen, baseClose, baseHigh, baseLow, prevOpen, prevClose, prevHigh, prevLow) or isDropCandle(baseOpen, baseClose, baseHigh, baseLow, prevOpen, prevClose, prevHigh, prevLow)
+                        lowestBase := low[j - 1]
+                        highestBase := high[j - 1]
+                        //@variable The `chart.point` for the bottom-right corner of the box. Does not contain `time` information.
+                        bottomRight = chart.point.from_index(bar_index - j + 1, lowestBase)
+                        topLeft = chart.point.from_index(bar_index - j + 1, highestBase)
+                        if testedZone == true or isSupplyTestedZone(i, lowestBase) == false
+                            var id = bar_index - i
+                            array.push(supplyZones, box.new(topLeft, bottomRight, color.red, 2, bgcolor = color.new(color.red, 70), extend = extend.right))
+                            isZoneFound := true
+                            isZoneFound
+                    else
+                        lowestBase := math.min(lowestBase, baseLow, prevBaseLow)
+                        highestBase := math.max(highestBase, baseHigh, prevBaseHigh)
+                        highestBase
+                    if isZoneFound
+                        break
+
+        [demandZones, supplyZones]
+
+// Plot Zones
+[demandZones, supplyZones] = detectZones()
